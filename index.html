@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="./lib/crypto-js.min.js"></script>
+  </head>
+
+  <body>
+    <div class="container">
+      <textarea 
+        class="message-input" 
+        placeholder="请输入消息内容" 
+        rows="4"
+        id="messageInput"
+      ></textarea>
+      
+      <div style="display: flex; gap: 10px; justify-content: flex-end;">
+        <button class="button primary" onclick="sendMessage()">发送</button>
+        <button class="button secondary" onclick="toggleConfig()">配置</button>
+      </div>
+
+      <div class="config-panel" id="configPanel">
+        <h3>加密配置</h3>
+        <div style="margin-top: 15px;">
+          <div class="input-group">
+            <label>API 地址:</label>
+            <div class="input-with-button">
+              <input 
+                type="text" 
+                id="apiUrlInput"
+                placeholder="https://api.day.app"
+              />
+              <button class="small-button" onclick="toggleVisibility('apiUrlInput')">👁️</button>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>设备密钥:</label>
+            <div class="input-with-button">
+              <input 
+                type="password" 
+                id="deviceKeyInput"
+              />
+              <button class="small-button" onclick="toggleVisibility('deviceKeyInput')">👁️</button>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>密钥 (16位):</label>
+            <div class="input-with-button">
+              <input 
+                type="password" 
+                id="keyInput"
+                maxlength="16"
+              />
+              <button class="small-button" onclick="toggleVisibility('keyInput')">👁️</button>
+            </div>
+          </div>
+          <div class="input-group">
+            <label>IV (16位):</label>
+            <div class="input-with-button">
+              <input 
+                type="password" 
+                id="ivInput"
+                maxlength="16"
+              />
+              <button class="small-button" onclick="toggleVisibility('ivInput')">👁️</button>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top: 20px; text-align: right;">
+          <button class="button primary" onclick="saveConfig()">保存</button>
+          <button class="button danger" onclick="toggleConfig()">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      document.addEventListener('keydown', function(e) {
+        if ((e.ctrlKey && e.key === 'Enter') || (!e.ctrlKey && e.key === 'Enter' && !e.shiftKey)) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+
+      window.onload = function() {
+        const savedConfig = localStorage.getItem('messageConfig');
+        if (savedConfig) {
+          const config = JSON.parse(savedConfig);
+          document.getElementById('apiUrlInput').value = config.apiUrl || 'https://api.day.app';
+          document.getElementById('deviceKeyInput').value = config.deviceKey;
+          document.getElementById('keyInput').value = config.key;
+          document.getElementById('ivInput').value = config.iv;
+        } else {
+          document.getElementById('apiUrlInput').value = 'https://api.day.app';
+        }
+        
+        document.getElementById('messageInput').focus();
+      };
+
+      function toggleVisibility(inputId) {
+        const input = document.getElementById(inputId);
+        input.type = input.type === 'password' ? 'text' : 'password';
+      }
+
+      function toggleConfig() {
+        const panel = document.getElementById('configPanel');
+        panel.classList.toggle('show');
+        if (panel.classList.contains('show')) {
+          document.getElementById('keyInput').focus();
+        }
+      }
+
+      function saveConfig() {
+        const apiUrl = document.getElementById('apiUrlInput').value.trim();
+        const key = document.getElementById('keyInput').value;
+        const iv = document.getElementById('ivInput').value;
+        const deviceKey = document.getElementById('deviceKeyInput').value;
+
+        if (!apiUrl) {
+          alert('请输入 API 地址！');
+          return;
+        }
+
+        if (key.length !== 16 || iv.length !== 16) {
+          alert('密钥和 IV 都必须是16位！');
+          return;
+        }
+
+        if (!deviceKey) {
+          alert('请输入设备密钥！');
+          return;
+        }
+
+        const config = { apiUrl, key, iv, deviceKey };
+        localStorage.setItem('messageConfig', JSON.stringify(config));
+        toggleConfig();
+        document.getElementById('messageInput').focus();
+        showNotification('配置已保存！');
+      }
+
+      function encryptMessage(text) {
+        const savedConfig = localStorage.getItem('messageConfig');
+        if (!savedConfig) {
+          alert('请先配置加密参数！');
+          toggleConfig();
+          return null;
+        }
+
+        const config = JSON.parse(savedConfig);
+        const key = CryptoJS.enc.Utf8.parse(config.key);
+        const iv = CryptoJS.enc.Utf8.parse(config.iv);
+
+        try {
+          return CryptoJS.AES.encrypt(text, key, {
+            iv: iv,
+            mode: CryptoJS.mode.CBC,
+            padding: CryptoJS.pad.Pkcs7
+          }).toString();
+        } catch (error) {
+          alert('加密失败：' + error.message);
+          return null;
+        }
+      }
+
+      async function sendMessage() {
+        const messageInput = document.getElementById('messageInput');
+        const message = messageInput.value.trim();
+
+        if (!message) {
+          alert('请输入消息内容！');
+          return;
+        }
+
+        const payload = {
+          body: message,
+          sound: "birdsong"  // 使用固定的提示音
+        };
+
+        const encrypted = encryptMessage(JSON.stringify(payload));
+        if (encrypted) {
+          try {
+            const savedConfig = localStorage.getItem('messageConfig');
+            const config = JSON.parse(savedConfig);
+            
+            const params = new URLSearchParams();
+            params.append('ciphertext', encrypted);
+            params.append('iv', config.iv);
+
+            const response = await fetch(`${config.apiUrl}/${config.deviceKey}`, {
+              method: 'POST',
+              body: params
+            });
+
+            if (!response.ok) {
+              throw new Error('发送失败');
+            }
+
+            messageInput.value = '';
+            showNotification('发送成功！');
+          } catch (error) {
+            alert('发送失败：' + error.message);
+          }
+        }
+      }
+
+      function showNotification(message) {
+        const notification = document.createElement('div');
+        notification.textContent = message;
+        notification.className = 'notification';
+        document.body.appendChild(notification);
+        setTimeout(() => notification.remove(), 2000);
+      }
+    </script>
+  </body>
+</html>
